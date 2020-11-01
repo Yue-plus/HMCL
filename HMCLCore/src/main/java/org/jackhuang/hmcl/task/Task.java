@@ -31,6 +31,7 @@ import org.jackhuang.hmcl.util.function.ExceptionalConsumer;
 import org.jackhuang.hmcl.util.function.ExceptionalFunction;
 import org.jackhuang.hmcl.util.function.ExceptionalRunnable;
 import org.jackhuang.hmcl.util.function.ExceptionalSupplier;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 import java.util.concurrent.Callable;
@@ -131,6 +132,7 @@ public abstract class Task<T> {
      *
      * @return the exception thrown during execution, possibly from dependents or dependencies.
      */
+    @Nullable
     public final Exception getException() {
         return exception;
     }
@@ -372,23 +374,6 @@ public abstract class Task<T> {
 
     public final TaskExecutor executor(TaskListener taskListener) {
         TaskExecutor executor = new AsyncTaskExecutor(this);
-        executor.addTaskListener(taskListener);
-        return executor;
-    }
-
-    public final TaskExecutor cancellableExecutor() {
-        return new CancellableTaskExecutor(this);
-    }
-
-    public final TaskExecutor cancellableExecutor(boolean start) {
-        TaskExecutor executor = new CancellableTaskExecutor(this);
-        if (start)
-            executor.start();
-        return executor;
-    }
-
-    public final TaskExecutor cancellableExecutor(TaskListener taskListener) {
-        TaskExecutor executor = new CancellableTaskExecutor(this);
         executor.addTaskListener(taskListener);
         return executor;
     }

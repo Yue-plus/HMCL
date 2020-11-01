@@ -29,6 +29,7 @@ import org.jackhuang.hmcl.auth.AccountFactory;
 import org.jackhuang.hmcl.auth.AuthenticationException;
 import org.jackhuang.hmcl.auth.authlibinjector.AuthlibInjectorAccount;
 import org.jackhuang.hmcl.auth.authlibinjector.AuthlibInjectorAccountFactory;
+import org.jackhuang.hmcl.auth.authlibinjector.AuthlibInjectorArtifactInfo;
 import org.jackhuang.hmcl.auth.authlibinjector.AuthlibInjectorArtifactProvider;
 import org.jackhuang.hmcl.auth.authlibinjector.AuthlibInjectorDownloader;
 import org.jackhuang.hmcl.auth.authlibinjector.AuthlibInjectorServer;
@@ -40,7 +41,6 @@ import org.jackhuang.hmcl.auth.yggdrasil.YggdrasilAccountFactory;
 import org.jackhuang.hmcl.task.Schedulers;
 
 import java.io.IOException;
-import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.Map;
@@ -62,9 +62,22 @@ import static org.jackhuang.hmcl.util.i18n.I18n.i18n;
 public final class Accounts {
     private Accounts() {}
 
+    private static final AuthlibInjectorArtifactProvider AUTHLIB_INJECTOR_DOWNLOADER = createAuthlibInjectorArtifactProvider();
+    private static void triggerAuthlibInjectorUpdateCheck() {
+        if (AUTHLIB_INJECTOR_DOWNLOADER instanceof AuthlibInjectorDownloader) {
+            Schedulers.io().execute(() -> {
+                try {
+                    ((AuthlibInjectorDownloader) AUTHLIB_INJECTOR_DOWNLOADER).checkUpdate();
+                } catch (IOException e) {
+                    LOG.log(Level.WARNING, "Failed to check update for authlib-injector", e);
+                }
+            });
+        }
+    }
+
     public static final OfflineAccountFactory FACTORY_OFFLINE = OfflineAccountFactory.INSTANCE;
     public static final YggdrasilAccountFactory FACTORY_MOJANG = YggdrasilAccountFactory.MOJANG;
-    public static final AuthlibInjectorAccountFactory FACTORY_AUTHLIB_INJECTOR = new AuthlibInjectorAccountFactory(createAuthlibInjectorArtifactProvider(), Accounts::getOrCreateAuthlibInjectorServer);
+    public static final AuthlibInjectorAccountFactory FACTORY_AUTHLIB_INJECTOR = new AuthlibInjectorAccountFactory(AUTHLIB_INJECTOR_DOWNLOADER, Accounts::getOrCreateAuthlibInjectorServer);
 
     // ==== login type / account factory mapping ====
     private static final Map<String, AccountFactory<?>> type2factory = new HashMap<>();
@@ -207,6 +220,10 @@ public final class Accounts {
             });
         }
 
+        if (!config().getAuthlibInjectorServers().isEmpty()) {
+            triggerAuthlibInjectorUpdateCheck();
+        }
+
         for (AuthlibInjectorServer server : config().getAuthlibInjectorServers()) {
             if (selected instanceof AuthlibInjectorAccount && ((AuthlibInjectorAccount) selected).getServer() == server)
                 continue;
@@ -244,12 +261,19 @@ public final class Accounts {
     private static AuthlibInjectorArtifactProvider createAuthlibInjectorArtifactProvider() {
         String authlibinjectorLocation = System.getProperty("hmcl.authlibinjector.location");
         if (authlibinjectorLocation == null) {
-            Path currentDirectory = Paths.get(".");
-            Path artifactsDirectory = AuthlibInjectorDownloader.isArtifactsDirectory(currentDirectory)
-                    ? currentDirectory
-                    : Metadata.HMCL_DIRECTORY;
-
-            return new AuthlibInjectorDownloader(artifactsDirectory, DownloadProviders::getDownloadProvider);
+            return new AuthlibInjectorDownloader(
+                    Metadata.HMCL_DIRECTORY.resolve("authlib-injector.jar"),
+                    DownloadProviders::getDownloadProvider) {
+                @Override
+                public Optional<AuthlibInjectorArtifactInfo> getArtifactInfoImmediately() {
+                    Optional<AuthlibInjectorArtifactInfo> local = super.getArtifactInfoImmediately();
+                    if (local.isPresent()) {
+                        return local;
+                    }
+                    // search authlib-injector.jar in current directory, it's used as a fallback
+                    return parseArtifact(Paths.get("authlib-injector.jar"));
+                }
+            };
         } else {
             LOG.info("Using specified authlib-injector: " + authlibinjectorLocation);
             return new SimpleAuthlibInjectorArtifactProvider(Paths.get(authlibinjectorLocation));
